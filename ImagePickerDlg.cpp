@@ -259,6 +259,9 @@ void CImagePickerDlg::MyInitFunc()
 
 	ChangeFont();
 
+	ReadSetParameters();
+	DispWorkDirectory();
+
 	m_bStart = FALSE;
 	UpdateBtnStatus();
 
@@ -285,6 +288,15 @@ void CImagePickerDlg::ChangeFont()
 	GetDlgItem(IDC_MAIN_BTN_STOP)->SetFont(&m_btnFont);
 	GetDlgItem(IDC_MAIN_BTN_NEXT)->SetFont(&m_btnNextFont);
 	//////////////////////////////////////////////////////////////////////////////////////////////////
+
+	///////////////////   修改static的字体  ///////////////////////////////////////////////////////
+	m_staticFont.CreatePointFont(120, _T("微软雅黑"), pdc);
+
+	GetDlgItem(IDC_MAIN_STATIC_DISP_RECV_DIR)->SetFont(&m_staticFont);
+	GetDlgItem(IDC_MAIN_STATIC_DISP_PICK_DIR)->SetFont(&m_staticFont);
+	GetDlgItem(IDC_MAIN_STATIC_DISP_BACK_DIR)->SetFont(&m_staticFont);
+	//////////////////////////////////////////////////////////////////////////////////////////////////
+
 
 	ReleaseDC(pdc);
 }
@@ -316,7 +328,12 @@ void CImagePickerDlg::OnBnClickedMainBtnParamSet()
 	// TODO:  在此添加控件通知处理程序代码
 	CParamSetDlg dlg;
 
-	dlg.DoModal();
+
+	if (dlg.DoModal() == IDOK)
+	{
+		ReadSetParameters();
+		DispWorkDirectory();
+	}
 }
 
 //-----------------------------------------------------------------------
@@ -391,6 +408,27 @@ void CImagePickerDlg::ReadSetParameters()
 	::GetPrivateProfileString(_T("图片目录参数"), _T("选稿目录"), _T("D:/pick"), m_pstThreadParam->m_szPickDir, MAX_PATH, strPath);
 	::GetPrivateProfileString(_T("图片目录参数"), _T("备份目录"), _T("D:/back"), m_pstThreadParam->m_szBackDir, MAX_PATH, strPath);
 	::GetPrivateProfileString(_T("图片目录参数"), _T("临时目录"), _T("D:/imagepicktemp"), m_pstThreadParam->m_szTempDir, MAX_PATH, strPath);
+}
+
+//-----------------------------------------------------------------------
+/**
+\brief   在static空间上显示设置的工作目录信息
+\param   无
+\return  无
+*/
+//-----------------------------------------------------------------------
+void CImagePickerDlg::DispWorkDirectory()
+{
+	WCHAR szTemp[256];
+
+	wsprintf(szTemp, L"收稿目录 ： %ws", m_pstThreadParam->m_szRecvDir);
+	GetDlgItem(IDC_MAIN_STATIC_DISP_RECV_DIR)->SetWindowText(szTemp);
+
+	wsprintf(szTemp, L"选稿目录 ： %ws", m_pstThreadParam->m_szPickDir);
+	GetDlgItem(IDC_MAIN_STATIC_DISP_PICK_DIR)->SetWindowText(szTemp);
+
+	wsprintf(szTemp, L"备份目录 ： %ws", m_pstThreadParam->m_szBackDir);
+	GetDlgItem(IDC_MAIN_STATIC_DISP_BACK_DIR)->SetWindowText(szTemp);
 }
 
 //-----------------------------------------------------------------------

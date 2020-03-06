@@ -31,9 +31,10 @@ public:
 	virtual void DoDataExchange(CDataExchange* pDX);	// DDX/DDV 支持
 
 private:
-	BOOL m_bStart;         /// 这个变量主要用来设置按钮的可用状态
+	BOOL  m_bStart;        /// 这个变量主要用来设置按钮的可用状态
 	CFont m_btnFont;       /// 按钮的字体
 	CFont m_btnNextFont;   /// 下一批图片按钮的字体
+	CFont m_staticFont;    /// static控件显示工作目录的字体
 
 	/// 收稿分稿线程的对象
 	CWinThread *m_pMonitorThread;
@@ -52,6 +53,9 @@ public:
 
 	/// 读取设置参数文件
 	void ReadSetParameters();
+
+	/// 在static控件上显示设置的工作目录信息
+	void DispWorkDirectory();
 
 // 实现
 protected:
