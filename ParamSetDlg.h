@@ -13,10 +13,11 @@ public:
 
 // 对话框数据
 	enum { IDD = IDD_DLG_PARAM_SET };
-	CString m_strImageRecvDir;
-	CString m_strImagePickDir;
-	CString m_strImageBackDir;
-
+	CString m_strImageRecvDir;            /// 收稿目录
+	CString m_strImagePickDir;            /// 选稿目录
+	CString m_strImageBackDir;            /// 备份目录
+	CString m_strImageTempDir;            /// 将收稿的图片先收到此目录，用户点击下一批图片的时候再移动到选稿目录，此目录必须与选稿目录同在一个盘，这样移动速度很快。
+	            
 public:
 	void MyInitFunc();
 

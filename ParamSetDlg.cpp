@@ -94,6 +94,8 @@ void CParamSetDlg::OnBnClickedSetBtnSave()
 	WriteSetParameters();
 
 	MessageBox(_T("参数保存成功!"), _T("成功"), MB_OK);
+
+	EndDialog(IDOK);
 }
 
 
@@ -132,7 +134,8 @@ void CParamSetDlg::ReadSetParameters()
 
 	::GetPrivateProfileString(_T("图片目录参数"), _T("收稿目录"), _T("D:/recv"), m_strImageRecvDir.GetBuffer(MAX_PATH), MAX_PATH, strPath);
 	::GetPrivateProfileString(_T("图片目录参数"), _T("选稿目录"), _T("D:/pick"), m_strImagePickDir.GetBuffer(MAX_PATH), MAX_PATH, strPath);
-	::GetPrivateProfileString(_T("图片目录参数"), _T("备份目录"), _T("d:/back"), m_strImageBackDir.GetBuffer(MAX_PATH), MAX_PATH, strPath);
+	::GetPrivateProfileString(_T("图片目录参数"), _T("备份目录"), _T("D:/back"), m_strImageBackDir.GetBuffer(MAX_PATH), MAX_PATH, strPath);
+	::GetPrivateProfileString(_T("图片目录参数"), _T("临时目录"), _T("D:/imagepicktemp"), m_strImageTempDir.GetBuffer(MAX_PATH), MAX_PATH, strPath);
 }
 
 //-----------------------------------------------------------------------
@@ -149,4 +152,9 @@ void CParamSetDlg::WriteSetParameters()
 	::WritePrivateProfileString(_T("图片目录参数"), _T("收稿目录"), m_strImageRecvDir, strPath);
 	::WritePrivateProfileString(_T("图片目录参数"), _T("选稿目录"), m_strImagePickDir, strPath);
 	::WritePrivateProfileString(_T("图片目录参数"), _T("备份目录"), m_strImageBackDir, strPath);
+
+	/// 提取选稿目录的盘符
+	m_strImageTempDir = m_strImagePickDir.Left(3) + _T("imagepicktemp");
+
+	::WritePrivateProfileString(_T("图片目录参数"), _T("临时目录"), m_strImageTempDir, strPath);
 }
