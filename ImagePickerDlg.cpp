@@ -24,6 +24,12 @@
 /********* 目录监控，收稿分稿线程 ***********/
 UINT MonitorDir(LPVOID pParam);
 
+/************* 异步目录监控  ****************/
+UINT MonitorDirAsyn(LPVOID pParam);
+
+/********* 目录监控函数收到结果时，进行回调的routine**********/
+VOID WINAPI CompletedCopyFileRoutine(DWORD, DWORD, LPOVERLAPPED);
+
 /********* 寻论目录，收稿分稿线程 ***********/
 UINT CheckDir(LPVOID pParam);
 
@@ -56,6 +62,17 @@ HANDLE g_hStopEvent;
   量，同时将文件计数器清零，重新进行累计。
 *********************************************/
 HANDLE g_hNextEvent;
+
+/****** 用来进行异步监控目录的的同步量 ******/
+/*
+异步监控目录，需要设置一个overlapped结构，当
+监控目录的函数返回时，需要有一个event的同步量
+发出通知，然后调用例程拷贝文件。
+*********************************************/
+HANDLE g_hOverlappedEvent;
+
+/************ 异步监控目录的结构体 **********/
+OVERLAPPED gOverlapped;
 
 // 用于应用程序“关于”菜单项的 CAboutDlg 对话框
 
@@ -102,6 +119,9 @@ CImagePickerDlg::~CImagePickerDlg()
 
 	/// 关闭文件计数器同步量的句柄
 	CloseHandle(g_hNextEvent);
+
+	/// 关闭异步监控目录和拷贝文件的额同步量
+	CloseHandle(g_hOverlappedEvent);
 
 	/// 销毁收稿分稿线程的参数指针
 	delete m_pstThreadParam;
@@ -256,6 +276,7 @@ void CImagePickerDlg::MyInitFunc()
 
 	g_hStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 	g_hNextEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+	g_hOverlappedEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 
 	ChangeFont();
 
@@ -355,6 +376,7 @@ void CImagePickerDlg::OnBnClickedMainBtnStart()
 
 	ResetEvent(g_hStopEvent);
 	//BEGIN_THREAD(m_pMonitorThread, MonitorDir, m_pstThreadParam)
+	//BEGIN_THREAD(m_pMonitorThread, MonitorDirAsyn, m_pstThreadParam)
 	BEGIN_THREAD(m_pMonitorThread, CheckDir, m_pstThreadParam)
 
 	m_bStart = TRUE;
@@ -412,7 +434,7 @@ void CImagePickerDlg::ReadSetParameters()
 
 //-----------------------------------------------------------------------
 /**
-\brief   在static空间上显示设置的工作目录信息
+\brief   在static控件上显示设置的工作目录信息
 \param   无
 \return  无
 */
@@ -473,12 +495,13 @@ UINT MonitorDir(LPVOID pParam)
 	while (TRUE)
 	{
 		ZeroMemory(pNotify, sizeof(FILE_NOTIFY_INFORMATION));
+		TRACE(L"###### start to read changes ... #######\n");
 		bRet = ReadDirectoryChangesW(hRecvDir, pNotify, sizeof(szBuf), FALSE, FILE_NOTIFY_CHANGE_FILE_NAME, &dwBytesRet, NULL, NULL);
+		TRACE(L"###### MONITOR FUNC RETURNS #######\n");
 
 		switch (pNotify->Action)
 		{
 		case FILE_ACTION_ADDED:
-			TRACE(" ====== file add ========\n");
 			CheckMoveFile(pInfo, pNotify);
 			break;
 		default:
@@ -496,6 +519,88 @@ UINT MonitorDir(LPVOID pParam)
 
 
 	return EXIT_SUCCESS;
+}
+
+/**
+\brief   监控目录,收稿分稿线程
+\param   线程参数指针
+\return  成功结束返回 True
+*/
+UINT MonitorDirAsyn(LPVOID pParam)
+{
+	THREADPARAM *pInfo = (THREADPARAM *)pParam;
+	HANDLE hRecvDir = NULL;
+
+	////////////  监控函数 ReadDirectoryChangesW 需要的结构体 ///////////////////
+	char szBuf[2 * (sizeof(FILE_NOTIFY_INFORMATION) + MAX_PATH)] = { 0 };
+	FILE_NOTIFY_INFORMATION* pNotify = (FILE_NOTIFY_INFORMATION *)szBuf;
+	/////////////////////////////////////////////////////////////////////////////
+
+	DWORD dwFilesCounter = 0;
+	DWORD dwBytesRet = 0;
+
+	BOOL bRet = TRUE;
+
+	hRecvDir = CreateFile(
+		pInfo->m_szRecvDir,                               // pointer to the file name
+		GENERIC_READ | GENERIC_WRITE,                     // access (read/write) mode
+		FILE_SHARE_READ | FILE_SHARE_WRITE,               // share mode
+		NULL,                                             // security descriptor
+		OPEN_EXISTING,                                    // how to create
+		FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OVERLAPPED,  // file attributes
+		NULL                                              // file with attributes to copy
+		);
+
+	if (hRecvDir == INVALID_HANDLE_VALUE)
+	{
+		AfxMessageBox(L"打开监控目录出错，请检查收稿目录是否存在或能否正确访问！");
+
+		return EXIT_FAILURE;
+	}
+
+	gOverlapped.hEvent = g_hOverlappedEvent;
+	gOverlapped.Offset = 0;
+
+	while (TRUE)
+	{
+		ZeroMemory(pNotify, sizeof(FILE_NOTIFY_INFORMATION));
+		bRet = ReadDirectoryChangesW(hRecvDir, pNotify, sizeof(szBuf), FALSE, FILE_NOTIFY_CHANGE_FILE_NAME, &dwBytesRet, &gOverlapped, CompletedCopyFileRoutine);
+		TRACE(L"#### monitor dir returns ####\n");
+
+		switch (pNotify->Action)
+		{
+		case FILE_ACTION_ADDED:
+			//CheckMoveFile(pInfo, pNotify);
+			TRACE("@@@@@@ begin to wait for routine event @@@@@@\n");
+			WaitForSingleObjectEx(g_hOverlappedEvent, 0, TRUE);
+			break;
+		default:
+			break;
+		}
+
+		/******* 程序是否退出 *******************************************************************/
+		if (WaitForSingleObject(g_hStopEvent, 0) == WAIT_OBJECT_0)
+		{
+			TRACE("@@@ exit thread @@@\n");
+
+			break;
+		}
+	}
+
+
+	return EXIT_SUCCESS;
+}
+
+//-----------------------------------------------------------------------
+/**
+\brief   监控目录函数readdirectorychangew返回时，进行回调执行的routine
+\param   线程参数指针
+\return  成功结束返回 True
+*/
+//-----------------------------------------------------------------------
+VOID WINAPI CompletedCopyFileRoutine(DWORD dwErrorCode, DWORD dwNumberOfBytesTransferred, LPOVERLAPPED lpOverlapped)
+{
+	TRACE(L" ###### ENTER THE COMPLETE ROUTINE ######\n");
 }
 
 //-----------------------------------------------------------------------
@@ -539,13 +644,13 @@ UINT CheckDir(LPVOID pParam)
 			}
 			else
 			{
-				wsprintf(szRecvFilePathName, L"%ws\\%s", pInfo->m_szRecvDir, stFindData.cFileName);
+				wsprintf(szRecvFilePathName, L"%ws\\%ws", pInfo->m_szRecvDir, stFindData.cFileName);
 				TRACE(TEXT("#### FILE NAME = %s #####\n"), szRecvFilePathName);
 
 				if (CheckTransComplete(szRecvFilePathName))
 				{
-					wsprintf(szTempFilePathName, L"%ws\\%s", pInfo->m_szTempDir, stFindData.cFileName);
-					wsprintf(szBackFilePathName, L"%ws\\%s", pInfo->m_szBackDir, stFindData.cFileName);
+					wsprintf(szTempFilePathName, L"%ws\\%ws", pInfo->m_szTempDir, stFindData.cFileName);
+					wsprintf(szBackFilePathName, L"%ws\\%ws", pInfo->m_szBackDir, stFindData.cFileName);
 
 					CopyFile(szRecvFilePathName, szTempFilePathName, FALSE);
 					CopyFile(szRecvFilePathName, szBackFilePathName, FALSE);
@@ -585,31 +690,49 @@ static void CheckMoveFile(THREADPARAM *lpDirParam, FILE_NOTIFY_INFORMATION* pNot
 {
 	PFILE_NOTIFY_INFORMATION p = pNotify;
 
+	/// 此变量专门用来提取收稿目录文件名，因为直接用pNotify->FileName有时会有问题，
+	/// 上次的文件名过长，上次文件名后面的字符不会被自动清除掉，在下一次的文件名末尾还有，
+	/// 因此需要此变量结合文件名的长度提取每次准确的文件名
+	WCHAR szFileName[200] = { 0 };
 	WCHAR szRecvFilePathName[MAX_PATH] = { 0 };
 	WCHAR szPickFilePathName[MAX_PATH] = { 0 };
 	WCHAR szBackFilePathName[MAX_PATH] = { 0 };
 	WCHAR szTempFilePathName[MAX_PATH] = { 0 };
 
-	//while (p->NextEntryOffset != 0)
-	//{
-		TRACE(" ===== FILE NAME ========\n");
-		wsprintf(szRecvFilePathName, L"%ws\\%s", lpDirParam->m_szRecvDir, p->FileName);
-		wsprintf(szTempFilePathName, L"%ws\\%s", lpDirParam->m_szTempDir, p->FileName);
-		wsprintf(szBackFilePathName, L"%ws\\%s", lpDirParam->m_szBackDir, p->FileName);
+	do
+	{
+		//TRACE(TEXT(" @@@@ recv file name  = %s num = %d @@@@\n"), p->FileName, p->FileNameLength);
+		wcsncpy_s(szFileName, p->FileName, p->FileNameLength/2);
+		wsprintf(szRecvFilePathName, L"%ws\\%ws", lpDirParam->m_szRecvDir, szFileName);
+		wsprintf(szTempFilePathName, L"%ws\\%ws", lpDirParam->m_szTempDir, szFileName);
+		wsprintf(szBackFilePathName, L"%ws\\%ws", lpDirParam->m_szBackDir, szFileName);
+		TRACE(TEXT(" @@@@ recv file name  = %s @@@@\n"), szRecvFilePathName);
 
 		if (CheckTransComplete(szRecvFilePathName))
 		{
-			CopyFile(szRecvFilePathName, szTempFilePathName, FALSE);
-			CopyFile(szRecvFilePathName, szBackFilePathName, FALSE);
-			DeleteFile(szRecvFilePathName);
+			//CopyFile(szRecvFilePathName, szTempFilePathName, FALSE);
+			//CopyFile(szRecvFilePathName, szBackFilePathName, FALSE);
+			//DeleteFile(szRecvFilePathName);
 		}
 		else
 		{
-			//printf("接收文件超时，请重新传送 %ws \n", lpRecvFileName);
+			WCHAR szMsg[256] = { 0 };
+			
+			wsprintf(szMsg, L"等待 %ws 传送完成超时！", szRecvFilePathName);
+			AfxMessageBox(szMsg);
 		}
 
-		//p = p + p->NextEntryOffset;
-	//}
+		//// 有时候会返回的是一个文件名列表，所以需要对 NextEntryOffset的值进行检查，为0表示没有 /////
+		if (p->NextEntryOffset != 0)
+		{
+			p = p + p->NextEntryOffset;
+		}
+		else
+		{
+			break;
+		}
+		//////////////////////////////////////////////////////////////////////////////////////////////
+	} while (TRUE);
 }
 
 //// 检查文件是否上传完毕 /////////////////////////
